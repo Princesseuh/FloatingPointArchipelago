@@ -20,7 +20,7 @@ The canonical Python world source lives in the [Archipelago fork](https://github
 ## Requirements
 
 - **Floating Point** on Steam
-- **BepInEx 5** win_x86 installed into the game folder (the game runs under Proton on Linux)
+- **BepInEx 5** win_x86 installed into the game folder
 - **Archipelago** 0.5.x client / server
 
 ---
@@ -29,7 +29,7 @@ The canonical Python world source lives in the [Archipelago fork](https://github
 
 1. Install [BepInEx 5 win_x86](https://github.com/BepInEx/BepInEx/releases) into the Floating Point game folder.
 2. Copy `BepInEx/plugins/FloatingPointArchipelago/` from the release ZIP into your game's `BepInEx/plugins/` folder.
-3. Launch the game through Steam. Press **F1** in-game to open the connection panel.
+3. Launch the game. Press **F1** in-game to open the connection panel.
 
 ---
 
@@ -42,9 +42,7 @@ cd src
 dotnet build -c Release
 ```
 
-The build target copies the DLL into `BepInEx/plugins/FloatingPointArchipelago/` automatically if `GAME_PATH` is set (or falls back to the default Steam Linux path).
-
-To override the game path:
+The build target copies the DLL into `BepInEx/plugins/FloatingPointArchipelago/` automatically. Use `GAME_PATH` to point it at your install:
 
 ```bash
 dotnet build -c Release /p:GAME_PATH="/path/to/Floating Point"
