@@ -97,6 +97,8 @@ Full option documentation is in [`apworld/floating_point/docs/setup_en.md`](http
 
 ## Locations
 
+Floating Point generates levels **infinitely** — there is no built-in level count. The mod tracks how many times you press Enter and maps each press to a numbered AP level. `num_levels` controls how many of those presses have checks attached; after that the game keeps going but no new checks are generated.
+
 With default settings (`num_levels: 10`): **331 locations**
 
 - 320 bar locations (32 bars × 10 levels)
