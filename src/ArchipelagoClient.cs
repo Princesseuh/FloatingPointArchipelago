@@ -27,10 +27,10 @@ namespace FloatingPointArchipelago
 
         // Slot data
         public int GoalType               { get; private set; } = 0;   // 0=levels_completed, 1=score, 2=bars_collected, 3=all_locations
-        public int GoalScore              { get; private set; } = 10_000;
+        public int GoalScore              { get; private set; } = 5_000_000;
         public int NumLevels              { get; private set; } = 10;
-        public int LevelsRequired         { get; private set; } = 3;
-        public int BarsRequired           { get; private set; } = 96;
+        public int LevelsRequired         { get; private set; } = 10;
+        public int BarsRequired           { get; private set; } = 320;
         public int LevelCompleteCondition { get; private set; } = 0;   // 0=all_bars, 1=press_enter
         public bool WaterAccessRequired   { get; private set; } = true; // false = water always open
         public bool LevelSkipRequired     { get; private set; } = true; // false = Enter always works
