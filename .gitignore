@@ -1,0 +1,18 @@
+# Build output
+src/bin/
+src/obj/
+
+# NuGet packages (restored automatically)
+src/packages/
+*.nupkg
+
+# Rider / VS / VS Code
+.idea/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db

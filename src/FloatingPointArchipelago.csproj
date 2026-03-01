@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net35</TargetFramework>
+    <AssemblyName>FloatingPointArchipelago</AssemblyName>
+    <RootNamespace>FloatingPointArchipelago</RootNamespace>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>9</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GAME_PATH)' == ''">
+    <GAME_PATH>/home/erika/.local/share/Steam/steamapps/common/Floating Point</GAME_PATH>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- BepInEx core references -->
+    <Reference Include="BepInEx">
+      <HintPath>$(GAME_PATH)/BepInEx/core/BepInEx.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(GAME_PATH)/BepInEx/core/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity 4.3 engine -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(GAME_PATH)/Floating Point_Data/Managed/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Game assembly -->
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GAME_PATH)/Floating Point_Data/Managed/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Archipelago.MultiClient.Net via NuGet -->
+    <PackageReference Include="Archipelago.MultiClient.Net" Version="6.5.0" />
+  </ItemGroup>
+
+  <Target Name="CopyToPlugins" AfterTargets="Build">
+    <MakeDir Directories="$(GAME_PATH)/BepInEx/plugins/FloatingPointArchipelago/" />
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
+          DestinationFolder="$(GAME_PATH)/BepInEx/plugins/FloatingPointArchipelago/" />
+    <Copy SourceFiles="@(ReferenceCopyLocalPaths)"
+          DestinationFolder="$(GAME_PATH)/BepInEx/plugins/FloatingPointArchipelago/"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>
