@@ -11,6 +11,9 @@ Swing through procedurally generated levels collecting red bars — now as part 
 | Path | Description |
 |------|-------------|
 | `src/` | C# BepInEx plugin source (net35, Unity 4.3) |
+| `APProxy/` | .NET 8 bridge process — handles the AP WebSocket connection over named pipes |
+| `PatchBepInEx/` | One-time patcher for BepInEx's TraceLogSource crash |
+| `PatchSystemDll/` | One-time patcher for Mono's broken Socket/Dns static constructors |
 | `apworld/floating_point.apworld` | Archipelago world file — drop into your AP `worlds/` folder or the client's custom worlds directory |
 
 The canonical Python world source lives in the [Archipelago fork](https://github.com/Princesseuh/Archipelago/tree/floating-point) at `worlds/floating_point/`.
@@ -68,7 +71,7 @@ dotnet run -- "C:\path\to\System.dll" "C:\path\to\output\System.dll"
 
 The plugin does **not** connect to the AP server directly — Unity 4.3's old Mono runtime cannot do modern TLS/WSS. Instead, **APProxy** runs as a separate .NET 8 process alongside the game and bridges the two over Windows named pipes.
 
-APProxy source is at [`C:\Users\Erika\Desktop\APProxy`] (not in this repo). A pre-built `APProxy.exe` is distributed separately.
+APProxy source lives in `APProxy/` in this repo. Build it with `dotnet publish` for distribution, or run it directly with `dotnet run`.
 
 ### Running APProxy
 
@@ -80,6 +83,13 @@ Example:
 
 ```
 APProxy.exe archipelago.gg:38281 Princesseuh hunter2
+```
+
+To run from source instead of a pre-built binary:
+
+```bash
+cd APProxy
+dotnet run -- archipelago.gg:38281 Princesseuh hunter2
 ```
 
 Start APProxy **before** launching the game. Once running, launch Floating Point, press **F1** to open the connection panel, and connect — the plugin will find APProxy's named pipes automatically.
