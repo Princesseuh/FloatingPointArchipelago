@@ -22,20 +22,83 @@ The canonical Python world source lives in the [Archipelago fork](https://github
 - **Floating Point** on Steam
 - **BepInEx 5** win_x86 installed into the game folder
 - **Archipelago** 0.5.x client / server
+- **APProxy** — a separate bridge process that handles the AP WebSocket connection (see below)
+- **.NET 8 runtime** — required to run APProxy
+
+---
+
+## One-time setup: patching the game
+
+Unity 4.3's bundled Mono runtime has two bugs that must be fixed by patching DLLs on disk before the game will work with BepInEx. Both patchers are in this repo under `PatchBepInEx/` and `PatchSystemDll/`. Run them once after installing BepInEx; you do not need to re-run them unless you reinstall BepInEx or verify game files.
+
+### PatchBepInEx — fixes BepInEx startup crash
+
+BepInEx 5 references `TraceLogSource`, which crashes on Unity 4.3's Mono. This patcher removes those references from `BepInEx.dll` and `BepInEx.Preloader.dll` in place.
+
+The game path is hardcoded to the default Steam install location. To run:
+
+```bash
+cd PatchBepInEx
+dotnet run
+```
+
+Original DLLs are backed up automatically (you'll see `BepInEx.dll.original` in `BepInEx/core/` afterwards).
+
+### PatchSystemDll — fixes Mono socket/DNS crash on startup
+
+The game's `System.dll` has broken static constructors for `Socket` and `Dns` that crash on startup under old Windows Mono. This patcher replaces them with minimal stubs (`ipv4=1, ipv6=0` for Socket; no-op for Dns).
+
+The game path is hardcoded to the default Steam install location. To run:
+
+```bash
+cd PatchSystemDll
+dotnet run
+```
+
+You can also pass explicit input/output paths:
+
+```bash
+dotnet run -- "C:\path\to\System.dll"
+dotnet run -- "C:\path\to\System.dll" "C:\path\to\output\System.dll"
+```
+
+---
+
+## APProxy
+
+The plugin does **not** connect to the AP server directly — Unity 4.3's old Mono runtime cannot do modern TLS/WSS. Instead, **APProxy** runs as a separate .NET 8 process alongside the game and bridges the two over Windows named pipes.
+
+APProxy source is at [`C:\Users\Erika\Desktop\APProxy`] (not in this repo). A pre-built `APProxy.exe` is distributed separately.
+
+### Running APProxy
+
+```
+APProxy.exe <host:port> <slot_name> [password]
+```
+
+Example:
+
+```
+APProxy.exe archipelago.gg:38281 Princesseuh hunter2
+```
+
+Start APProxy **before** launching the game. Once running, launch Floating Point, press **F1** to open the connection panel, and connect — the plugin will find APProxy's named pipes automatically.
 
 ---
 
 ## Installing the plugin
 
 1. Install [BepInEx 5 win_x86](https://github.com/BepInEx/BepInEx/releases) into the Floating Point game folder.
-2. Copy `BepInEx/plugins/FloatingPointArchipelago/` from the release ZIP into your game's `BepInEx/plugins/` folder.
-3. Launch the game. Press **F1** in-game to open the connection panel.
+2. Run `PatchBepInEx` and `PatchSystemDll` as described above (one-time).
+3. Copy `BepInEx/plugins/FloatingPointArchipelago/` from the release ZIP into your game's `BepInEx/plugins/` folder.
+4. Launch APProxy with your server details, then launch the game.
+5. Press **F1** in-game to open the connection panel.
 
 ---
 
 ## Building from source
 
-Requires the .NET SDK and the game installed at its default Steam path. NuGet restores `Archipelago.MultiClient.Net` (6.5.0) automatically.
+Requires the .NET SDK and the game installed at its default Steam path. NuGet restores `Newtonsoft.Json` automatically.
 
 ```bash
 cd src
@@ -45,7 +108,7 @@ dotnet build -c Release
 The build target copies the DLL into `BepInEx/plugins/FloatingPointArchipelago/` automatically. Use `GAME_PATH` to point it at your install:
 
 ```bash
-dotnet build -c Release /p:GAME_PATH="/path/to/Floating Point"
+dotnet build -c Release /p:GAME_PATH="C:\path\to\Floating Point"
 ```
 
 ---
