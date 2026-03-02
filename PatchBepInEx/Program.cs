@@ -8,7 +8,9 @@ class Program
 {
     static void Main(string[] args)
     {
-        string gamePath = @"C:\Program Files (x86)\Steam\steamapps\common\Floating Point";
+        string gamePath = args.Length > 0
+            ? args[0]
+            : @"C:\Program Files (x86)\Steam\steamapps\common\Floating Point";
         string preloaderDllPath = System.IO.Path.Combine(gamePath, "BepInEx", "core", "BepInEx.Preloader.dll");
         string bepinexDllPath   = System.IO.Path.Combine(gamePath, "BepInEx", "core", "BepInEx.dll");
 

@@ -38,11 +38,17 @@ Unity 4.3's bundled Mono runtime has two bugs that must be fixed by patching DLL
 
 BepInEx 5 references `TraceLogSource`, which crashes on Unity 4.3's Mono. This patcher removes those references from `BepInEx.dll` and `BepInEx.Preloader.dll` in place.
 
-The game path is hardcoded to the default Steam install location. To run:
+The game path defaults to the default Steam install location. To run:
 
 ```bash
 cd PatchBepInEx
 dotnet run
+```
+
+Or pass a custom game path:
+
+```bash
+dotnet run -- "C:\path\to\Floating Point"
 ```
 
 Original DLLs are backed up automatically (you'll see `BepInEx.dll.original` in `BepInEx/core/` afterwards).
@@ -51,7 +57,7 @@ Original DLLs are backed up automatically (you'll see `BepInEx.dll.original` in 
 
 The game's `System.dll` has broken static constructors for `Socket` and `Dns` that crash on startup under old Windows Mono. This patcher replaces them with minimal stubs (`ipv4=1, ipv6=0` for Socket; no-op for Dns).
 
-The game path is hardcoded to the default Steam install location. To run:
+The game path defaults to the default Steam install location. To run:
 
 ```bash
 cd PatchSystemDll
@@ -82,14 +88,14 @@ APProxy.exe <host:port> <slot_name> [password]
 Example:
 
 ```
-APProxy.exe archipelago.gg:38281 Princesseuh hunter2
+APProxy.exe archipelago.gg:38281 YourSlotName hunter2
 ```
 
 To run from source instead of a pre-built binary:
 
 ```bash
 cd APProxy
-dotnet run -- archipelago.gg:38281 Princesseuh hunter2
+dotnet run -- archipelago.gg:38281 YourSlotName hunter2
 ```
 
 Start APProxy **before** launching the game. Once running, launch Floating Point, press **F1** to open the connection panel, and connect — the plugin will find APProxy's named pipes automatically.
