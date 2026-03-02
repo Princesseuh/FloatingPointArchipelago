@@ -1,6 +1,6 @@
 # Build output
-src/bin/
-src/obj/
+bin/
+obj/
 
 # NuGet packages (restored automatically)
 src/packages/
