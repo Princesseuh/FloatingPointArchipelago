@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(GAME_PATH)' == ''">
-    <GAME_PATH>/home/erika/.local/share/Steam/steamapps/common/Floating Point</GAME_PATH>
+    <GAME_PATH>C:\Program Files (x86)\Steam\steamapps\common\Floating Point</GAME_PATH>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,6 +20,12 @@
     </Reference>
     <Reference Include="0Harmony">
       <HintPath>$(GAME_PATH)/BepInEx/core/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Mono.Cecil for patching -->
+    <Reference Include="Mono.Cecil">
+      <HintPath>$(GAME_PATH)/BepInEx/core/Mono.Cecil.dll</HintPath>
       <Private>false</Private>
     </Reference>
 
@@ -35,8 +41,8 @@
       <Private>false</Private>
     </Reference>
 
-    <!-- Archipelago.MultiClient.Net via NuGet -->
-    <PackageReference Include="Archipelago.MultiClient.Net" Version="6.5.0" />
+    <!-- Archipelago.MultiClient.Net via NuGet — only for Newtonsoft.Json -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
 
   <Target Name="CopyToPlugins" AfterTargets="Build">
@@ -47,4 +53,5 @@
           DestinationFolder="$(GAME_PATH)/BepInEx/plugins/FloatingPointArchipelago/"
           SkipUnchangedFiles="true" />
   </Target>
+
 </Project>

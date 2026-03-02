@@ -1,46 +1,66 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.IO.Pipes;
+using System.Text;
 using System.Threading;
-using Archipelago.MultiClient.Net;
-using Archipelago.MultiClient.Net.Enums;
-using Archipelago.MultiClient.Net.Helpers;
-using Archipelago.MultiClient.Net.MessageLog.Messages;
-using Archipelago.MultiClient.Net.Models;
-using Archipelago.MultiClient.Net.Packets;
 using BepInEx.Logging;
+using Newtonsoft.Json.Linq;
 
 namespace FloatingPointArchipelago
 {
+    /// <summary>
+    /// Talks to APProxy.exe over a named pipe.
+    /// The proxy holds the real Archipelago.MultiClient.Net session and handles all WSS/TLS.
+    /// Protocol: newline-delimited JSON in both directions.
+    ///
+    /// Proxy -> Plugin:
+    ///   {"type":"connected","slot_data":{...},"checked_locations":[...]}
+    ///   {"type":"item","item_id":45000001}
+    ///   {"type":"disconnected"}
+    ///   {"type":"error","message":"..."}
+    ///
+    /// Plugin -> Proxy:
+    ///   {"type":"check","location_id":45000100}
+    ///   {"type":"goal"}
+    /// </summary>
     public class ArchipelagoClient
     {
         public const string GAME_NAME = "Floating Point";
+        const string PIPE_S2C = "FloatingPointArchipelago_S2C"; // proxy→game
+        const string PIPE_C2S = "FloatingPointArchipelago_C2S"; // game→proxy
 
         private static readonly ManualLogSource Logger =
             BepInEx.Logging.Logger.CreateLogSource("FP.APClient");
 
         public static ArchipelagoClient Instance { get; private set; }
 
-        public ArchipelagoSession Session  { get; private set; }
-        public bool IsConnected            { get; private set; }
-        public bool IsConnecting           { get; private set; }
-        public string LastError            { get; private set; }
+        public bool   IsConnected  { get; private set; }
+        public bool   IsConnecting { get; private set; }
+        public string LastError    { get; private set; }
 
         // Slot data
-        public int GoalType               { get; private set; } = 0;   // 0=levels_completed, 1=score, 2=bars_collected, 3=all_locations
-        public int GoalScore              { get; private set; } = 5_000_000;
-        public int NumLevels              { get; private set; } = 10;
-        public int LevelsRequired         { get; private set; } = 10;
-        public int BarsRequired           { get; private set; } = 320;
-        public int LevelCompleteCondition { get; private set; } = 0;   // 0=all_bars, 1=press_enter
-        public bool WaterAccessRequired   { get; private set; } = true; // false = water always open
-        public bool LevelSkipRequired     { get; private set; } = true; // false = Enter always works
-        public bool GrappleUnlockRequired { get; private set; } = true; // false = grapple always available
+        public int  GoalType               { get; private set; } = 0;
+        public int  LevelsRequired         { get; private set; } = 50;
+        public int  BarsRequired           { get; private set; } = 400;
+        public int  NumLevels              { get; private set; } = 50;
+        public bool WaterAccessRequired    { get; private set; } = true;
+        public bool GrappleUnlockRequired  { get; private set; } = true;
+        /// <summary>0=very_slow, 1=moderate, 2=near_default</summary>
+        public int  StartingRetractSpeed   { get; private set; } = 0;
 
-        // Callbacks wired up by ItemManager / LocationManager
-        public event Action<ItemInfo> OnItemReceived;
-        public event Action<string>   OnMessageReceived;
-        public event Action           OnConnected;
-        public event Action           OnDisconnected;
+        // Events
+        public event Action<long> OnItemReceived;
+        public event Action       OnConnected;
+        public event Action       OnDisconnected;
+
+        // Checked locations (populated from proxy on connect)
+        private readonly HashSet<long> _checkedLocations = new HashSet<long>();
+
+        private NamedPipeClientStream _pipeRead;   // S2C: proxy→game
+        private NamedPipeClientStream _pipeWrite;  // C2S: game→proxy
+        private StreamWriter          _writer;
+        private Thread                _readThread;
 
         public static void Init()
         {
@@ -48,83 +68,114 @@ namespace FloatingPointArchipelago
                 Instance = new ArchipelagoClient();
         }
 
-        /// <summary>Kicks off a background thread that connects to the AP server.</summary>
-        public void Connect(string host, string slotName, string password)
+        /// <summary>
+        /// Connects to the named pipe served by APProxy.exe.
+        /// All auth details (host/slot/password) are held by the proxy — no arguments needed.
+        /// </summary>
+        public void Connect()
         {
             if (IsConnecting || IsConnected) return;
             IsConnecting = true;
-            LastError = null;
+            LastError    = null;
 
-            var thread = new Thread(() => ConnectInternal(host, slotName, password));
-            thread.IsBackground = true;
-            thread.Start();
+            var t = new Thread(ConnectInternal);
+            t.IsBackground = true;
+            t.Start();
         }
 
-        private void ConnectInternal(string host, string slotName, string password)
+        private void ConnectInternal()
         {
             try
             {
-                Session = ArchipelagoSessionFactory.CreateSession(host);
+                Logger.LogInfo($"Connecting to APProxy pipes...");
 
-                var result = Session.TryConnectAndLogin(
-                    GAME_NAME,
-                    slotName,
-                    ItemsHandlingFlags.AllItems,
-                    new Version(0, 5, 1),
-                    password: string.IsNullOrEmpty(password) ? null : password
-                );
+                var enc = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
-                if (result.Successful)
+                // Connect S2C first (proxy is listening on both before we connect)
+                _pipeRead = new NamedPipeClientStream(".", PIPE_S2C, PipeDirection.In, PipeOptions.None);
+                _pipeRead.Connect(5000);
+                Logger.LogInfo("S2C pipe connected.");
+
+                _pipeWrite = new NamedPipeClientStream(".", PIPE_C2S, PipeDirection.Out, PipeOptions.None);
+                _pipeWrite.Connect(5000);
+                Logger.LogInfo("C2S pipe connected.");
+
+                _writer = new StreamWriter(_pipeWrite, enc) { AutoFlush = true, NewLine = "\n" };
+
+                // Wait for first message on the read pipe — must be "connected" or "error"
+                var reader = new StreamReader(_pipeRead, enc);
+                string firstLine = reader.ReadLine();
+                if (string.IsNullOrEmpty(firstLine))
                 {
-                    var ok = (LoginSuccessful)result;
-
-                    if (ok.SlotData.ContainsKey("goal_type"))
-                        GoalType = Convert.ToInt32(ok.SlotData["goal_type"]);
-                    if (ok.SlotData.ContainsKey("goal_score"))
-                        GoalScore = Convert.ToInt32(ok.SlotData["goal_score"]);
-                    if (ok.SlotData.ContainsKey("num_levels"))
-                        NumLevels = Convert.ToInt32(ok.SlotData["num_levels"]);
-                    if (ok.SlotData.ContainsKey("levels_required"))
-                        LevelsRequired = Convert.ToInt32(ok.SlotData["levels_required"]);
-                    if (ok.SlotData.ContainsKey("bars_required"))
-                        BarsRequired = Convert.ToInt32(ok.SlotData["bars_required"]);
-                    if (ok.SlotData.ContainsKey("level_complete_condition"))
-                        LevelCompleteCondition = Convert.ToInt32(ok.SlotData["level_complete_condition"]);
-                    if (ok.SlotData.ContainsKey("water_access_required"))
-                        WaterAccessRequired = Convert.ToInt32(ok.SlotData["water_access_required"]) != 0;
-                    if (ok.SlotData.ContainsKey("level_skip_required"))
-                        LevelSkipRequired = Convert.ToInt32(ok.SlotData["level_skip_required"]) != 0;
-                    if (ok.SlotData.ContainsKey("grapple_unlock_required"))
-                        GrappleUnlockRequired = Convert.ToInt32(ok.SlotData["grapple_unlock_required"]) != 0;
-
-                    // Wire up events
-                    Session.Items.ItemReceived += OnItemReceivedHandler;
-                    Session.MessageLog.OnMessageReceived += OnMessageReceivedHandler;
-                    Session.Socket.SocketClosed += OnSocketClosed;
-
-                    IsConnected = true;
-                    IsConnecting = false;
-
-                    Logger.LogInfo(
-                        $"Connected to Archipelago as '{slotName}'. " +
-                        $"GoalType={GoalType}, GoalScore={GoalScore}, " +
-                        $"LevelsRequired={LevelsRequired}, BarsRequired={BarsRequired}, " +
-                        $"LevelCompleteCondition={LevelCompleteCondition}");
-
-                    // Send the "Connected to Archipelago" location check before notifying
-                    // other systems — this is sphere 0 and must arrive at the server first
-                    // so that Grapple Unlock (sphere 1) is released to the player.
-                    LocationManager.Instance?.OnConnected();
-
-                    OnConnected?.Invoke();
-                }
-                else
-                {
-                    var fail = (LoginFailure)result;
-                    LastError = string.Join(", ", fail.Errors);
+                    LastError = "Proxy closed connection immediately";
                     Logger.LogError($"AP connection failed: {LastError}");
                     IsConnecting = false;
+                    return;
                 }
+
+                var msg = JObject.Parse(firstLine);
+                string type = (string)msg["type"];
+
+                if (type == "error")
+                {
+                    LastError = (string)msg["message"] ?? "Unknown error";
+                    Logger.LogError($"AP connection failed: {LastError}");
+                    IsConnecting = false;
+                    return;
+                }
+
+                if (type != "connected")
+                {
+                    LastError = $"Unexpected first message: {firstLine}";
+                    Logger.LogError($"AP connection failed: {LastError}");
+                    IsConnecting = false;
+                    return;
+                }
+
+                // Parse slot data
+                var sd = msg["slot_data"] as JObject;
+                if (sd != null)
+                {
+                    if (sd["goal_type"]               != null) GoalType               = (int)sd["goal_type"];
+                    if (sd["levels_required"]         != null) LevelsRequired         = (int)sd["levels_required"];
+                    if (sd["bars_required"]           != null) BarsRequired           = (int)sd["bars_required"];
+                    if (sd["num_levels"]              != null) NumLevels              = (int)sd["num_levels"];
+                    if (sd["water_access_required"]   != null) WaterAccessRequired    = (int)sd["water_access_required"] != 0;
+                    if (sd["grapple_unlock_required"] != null) GrappleUnlockRequired  = (int)sd["grapple_unlock_required"] != 0;
+                    if (sd["starting_retract_speed"]  != null) StartingRetractSpeed   = (int)sd["starting_retract_speed"];
+                }
+
+                // Parse already-checked locations
+                var checkedArr = msg["checked_locations"] as JArray;
+                if (checkedArr != null)
+                    foreach (var v in checkedArr)
+                        _checkedLocations.Add((long)v);
+
+                IsConnected  = true;
+                IsConnecting = false;
+
+                Logger.LogInfo(
+                    $"Connected via APProxy. GoalType={GoalType}, NumLevels={NumLevels}, LevelsRequired={LevelsRequired}, " +
+                    $"BarsRequired={BarsRequired}, GrappleUnlockRequired={GrappleUnlockRequired}, " +
+                    $"StartingRetractSpeed={StartingRetractSpeed}");
+
+                LocationManager.Instance?.OnConnected();
+                OnConnected?.Invoke();
+
+                // Replay all items received so far
+                var itemsArr = msg["items_received"] as JArray;
+                if (itemsArr != null)
+                {
+                    Logger.LogInfo($"Replaying {itemsArr.Count} previously received item(s).");
+                    foreach (var v in itemsArr)
+                        OnItemReceived?.Invoke((long)v);
+                }
+
+                // Start background writer and reader threads
+                StartWriteThread();
+                _readThread = new Thread(() => ReadLoop(reader));
+                _readThread.IsBackground = true;
+                _readThread.Start();
             }
             catch (Exception ex)
             {
@@ -134,79 +185,148 @@ namespace FloatingPointArchipelago
             }
         }
 
+        private void ReadLoop(StreamReader reader)
+        {
+            try
+            {
+                string line;
+                while ((line = reader.ReadLine()) != null)
+                {
+                    if (string.IsNullOrEmpty(line) || line.Trim().Length == 0) continue;
+                    try
+                    {
+                        var msg  = JObject.Parse(line);
+                        string t = (string)msg["type"];
+                        switch (t)
+                        {
+                            case "item":
+                                long itemId = (long)msg["item_id"];
+                                Logger.LogInfo($"Item received from proxy: {itemId}");
+                                OnItemReceived?.Invoke(itemId);
+                                break;
+
+                            case "disconnected":
+                                Logger.LogWarning("Proxy reports AP disconnected.");
+                                IsConnected = false;
+                                OnDisconnected?.Invoke();
+                                return;
+
+                            case "error":
+                                Logger.LogError($"Proxy error: {(string)msg["message"]}");
+                                break;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Bad message from proxy: {ex.Message} — {line}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (IsConnected)
+                    Logger.LogError($"Proxy read loop error: {ex.Message}");
+            }
+            finally
+            {
+                if (IsConnected)
+                {
+                    IsConnected = false;
+                    StopWriteThread();
+                    OnDisconnected?.Invoke();
+                }
+            }
+        }
+
         public void Disconnect()
         {
             if (!IsConnected) return;
-            try
-            {
-                Session?.Socket?.Disconnect();
-            }
-            catch { }
             IsConnected = false;
-            Session = null;
+            StopWriteThread();
+            try { _pipeRead?.Close(); } catch { }
+            try { _pipeWrite?.Close(); } catch { }
             OnDisconnected?.Invoke();
         }
 
         public void SendLocation(long locationId)
         {
-            if (!IsConnected) return;
-            try
-            {
-                Session.Locations.CompleteLocationChecks(locationId);
-                Logger.LogInfo($"Sent location check: {locationId}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Failed to send location {locationId}: {ex.Message}");
-            }
+            SendRaw($"{{\"type\":\"check\",\"location_id\":{locationId}}}");
+            Logger.LogInfo($"Sent location check: {locationId}");
         }
 
         public void SendGoalComplete()
         {
-            if (!IsConnected) return;
-            try
-            {
-                Session.Socket.SendPacket(new StatusUpdatePacket
-                {
-                    Status = ArchipelagoClientState.ClientGoal
-                });
-                Logger.LogInfo("Goal complete sent to Archipelago.");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Failed to send goal: {ex.Message}");
-            }
+            SendRaw("{\"type\":\"goal\"}");
+            Logger.LogInfo("Goal complete sent.");
         }
 
         public bool IsLocationChecked(long locationId)
         {
-            if (!IsConnected) return false;
-            return Session.Locations.AllLocationsChecked.Contains(locationId);
+            return _checkedLocations.Contains(locationId);
         }
 
-        // ── Event handlers ───────────────────────────────────────────────────
+        // Write queue — SendRaw enqueues; a background thread does the actual pipe write
+        // so the main thread (Unity Update) is never blocked by pipe I/O.
+        private readonly Queue<string>  _sendQueue  = new Queue<string>();
+        private readonly object         _sendLock   = new object();
+        private Thread                  _writeThread;
 
-        private void OnItemReceivedHandler(ReceivedItemsHelper helper)
+        private void StartWriteThread()
         {
-            // Dequeue all pending items and forward them
-            while (helper.Any())
+            _writeThread = new Thread(WriteLoop) { IsBackground = true };
+            _writeThread.Start();
+        }
+
+        private void WriteLoop()
+        {
+            while (true)
             {
-                var item = helper.DequeueItem();
-                Logger.LogInfo($"Received item: {item.ItemName ?? item.ItemId.ToString()}");
-                OnItemReceived?.Invoke(item);
+                string line = null;
+                lock (_sendLock)
+                {
+                    while (_sendQueue.Count == 0)
+                    {
+                        // If disconnected and queue is empty, exit
+                        if (!IsConnected) return;
+                        Monitor.Wait(_sendLock);
+                    }
+                    line = _sendQueue.Dequeue();
+                }
+
+                // Null sentinel: caller wants the thread to stop
+                if (line == null) return;
+
+                try
+                {
+                    _writer.WriteLine(line);
+                    Logger.LogInfo($"[WriteThread] wrote: {line}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Pipe write error: {ex.Message}");
+                    return;
+                }
             }
         }
 
-        private void OnMessageReceivedHandler(LogMessage message)
+        private void SendRaw(string json)
         {
-            OnMessageReceived?.Invoke(message.ToString());
+            if (!IsConnected) return;
+            lock (_sendLock)
+            {
+                _sendQueue.Enqueue(json);
+                Monitor.Pulse(_sendLock);
+            }
+            Logger.LogInfo($"[SendRaw] enqueued (queue size now ~{_sendQueue.Count}): {json}");
         }
 
-        private void OnSocketClosed(string reason)
+        private void StopWriteThread()
         {
-            Logger.LogWarning($"AP socket closed: {reason}");
-            IsConnected = false;
-            OnDisconnected?.Invoke();
+            lock (_sendLock)
+            {
+                _sendQueue.Enqueue(null); // sentinel
+                Monitor.Pulse(_sendLock);
+            }
         }
     }
 }

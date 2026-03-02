@@ -3,14 +3,19 @@ namespace FloatingPointArchipelago
     /// <summary>
     /// Central registry of all Archipelago location and item IDs for Floating Point.
     ///
-    /// Design:
-    ///   Locations = collecting red bars across levels.
-    ///   We support up to MAX_LEVELS levels, each with BARS_PER_LEVEL bar locations.
-    ///   The actual number of active levels comes from the AP slot (ArchipelagoClient.NumLevels).
-    ///   Location ID = BASE_LOCATION_ID + (levelIndex * BARS_PER_LEVEL) + barIndex
+    /// Location layout (dynamic based on num_levels N, default 50):
+    ///   N  cumulative-bar milestones : fire when total bars crosses 8, 16, ..., N*8.
+    ///                                  IDs = BASE + 0 .. BASE + N-1
+    ///   N  level completion checks   : fire on each level completed (water-gated).
+    ///                                  IDs = BASE + 10_000 .. BASE + 10_000 + N-1
+    ///    1 "Connected"               : ID  = BASE + 20_000
+    ///   16 single-level best-bar     : fire once when best-single-level bar count hits 2/4/.../32.
+    ///                                  IDs = BASE + 30_000 .. BASE + 30_015
+    ///                                  Thresholds 26-32 require Water Access.
+    ///    6 score milestones          : fire once when running score crosses 50k/100k/250k/500k/750k/1M.
+    ///                                  IDs = BASE + 40_000 .. BASE + 40_005
     ///
-    ///   Items = physics upgrades, score bonuses, and traps.
-    ///   Item ID = BASE_ITEM_ID + itemIndex
+    ///   Total = 2*N + 23  (default N=50 → 123 locations)
     /// </summary>
     public static class LocationData
     {
@@ -18,66 +23,86 @@ namespace FloatingPointArchipelago
         public const long BASE_LOCATION_ID = 45_000_000;
         public const long BASE_ITEM_ID     = 45_000_000;
 
-        // ── Location layout ─────────────────────────────────────────────────────
-        public const int MAX_LEVELS     = 30;   // hard ceiling; LOCATION_TABLE in apworld covers all 30
-        public const int BARS_PER_LEVEL = 32;   // matches GenerateLevel.barsOnThisLevel default
-
+        // ── Runtime level count (from slot data, default 50) ────────────────────
         /// <summary>
-        /// Runtime number of levels for this slot.
-        /// Falls back to 10 (the default) if no AP session is active.
+        /// Number of levels for this slot — drives both the cumulative-bar milestone
+        /// count and the level-completion check count. Falls back to 50 if no AP
+        /// session is active.
         /// </summary>
-        public static int NumLevels
-            => ArchipelagoClient.Instance?.NumLevels ?? 10;
+        public static int NumLevels => ArchipelagoClient.Instance?.NumLevels ?? 50;
 
-        /// <summary>Total AP location count for the current slot (bar + completion checks).</summary>
-        public static int TotalLocations
-            => NumLevels * BARS_PER_LEVEL + NumLevels;
+        // ── Cumulative-bar milestones ────────────────────────────────────────────
+        /// <summary>Number of cumulative-bar milestone locations (== NumLevels).</summary>
+        public static int TotalBarMilestoneCount => NumLevels;
+        /// <summary>Bar step between consecutive cumulative milestones.</summary>
+        public const int BAR_MILESTONE_STEP = 8;
 
-        // Bar locations: BASE + (levelIndex * BARS_PER_LEVEL) + barIndex  → 0..959 (up to MAX_LEVELS)
-        public static long GetLocationId(int levelIndex, int barIndex)
-            => BASE_LOCATION_ID + (levelIndex * BARS_PER_LEVEL) + barIndex;
+        public static int    GetCumulativeBarThreshold(int i)   => (i + 1) * BAR_MILESTONE_STEP;
+        public static long   GetCumulativeBarMilestoneId(int i)  => BASE_LOCATION_ID + i;
+        public static string GetCumulativeBarMilestoneName(int i)
+            => $"Total Bars - {GetCumulativeBarThreshold(i)} Collected";
 
-        public static string GetLocationName(int levelIndex, int barIndex)
-            => $"Level {levelIndex + 1} - Bar {barIndex + 1}";
-
-        // Level completion locations: BASE + 10_000 + levelIndex  → 10000..10029
+        // ── Level completion locations ───────────────────────────────────────────
+        /// <summary>Total level-completion check slots (== NumLevels).</summary>
+        public static int TotalLevelCompletions => NumLevels;
         public const long LEVEL_COMPLETE_OFFSET = 10_000;
 
-        public static long GetLevelCompleteLocationId(int levelIndex)
-            => BASE_LOCATION_ID + LEVEL_COMPLETE_OFFSET + levelIndex;
+        public static long   GetLevelCompleteLocationId(int i)   => BASE_LOCATION_ID + LEVEL_COMPLETE_OFFSET + i;
+        public static string GetLevelCompleteLocationName(int i) => $"Level Complete {i + 1}";
 
-        public static string GetLevelCompleteLocationName(int levelIndex)
-            => $"Level {levelIndex + 1} - Complete";
-
-        // "Connected to Archipelago" location: BASE + 20_000
-        // Lives in the Menu region with no access rule — always reachable.
-        // Sent the moment a connection succeeds; guarantees Grapple Unlock lands in sphere 0
-        // (i.e. another player can receive it immediately), preventing deadlock in solo games.
+        // ── "Connected to Archipelago" ───────────────────────────────────────────
         public const long LOCATION_CONNECTED = BASE_LOCATION_ID + 20_000;
 
+        // ── Single-level best-bar milestones ────────────────────────────────────
+        public const long BAR_MILESTONE_OFFSET = 30_000;
+
+        /// <summary>Thresholds for single-level best-bar milestones (every 2 bars, 2–32).</summary>
+        public static readonly int[] SINGLE_LEVEL_BAR_MILESTONES =
+            { 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32 };
+
+        /// <summary>
+        /// Single-level milestones with threshold strictly above this value require Water Access.
+        /// Bars 0-23 are above water; bars 24-31 are below. So 26 is the first water-gated threshold.
+        /// </summary>
+        public const int WATER_GATED_BAR_START = 24;
+
+        public static long   GetSingleLevelMilestoneId(int i)   => BASE_LOCATION_ID + BAR_MILESTONE_OFFSET + i;
+        public static string GetSingleLevelMilestoneName(int i) => $"Best Single Level - {SINGLE_LEVEL_BAR_MILESTONES[i]} Bars";
+
+        // ── Score milestones ─────────────────────────────────────────────────────
+        public const long SCORE_MILESTONE_OFFSET = 40_000;
+
+        /// <summary>Score thresholds for score milestone checks.</summary>
+        public static readonly float[] SCORE_MILESTONES = { 50_000f, 100_000f, 250_000f, 500_000f, 750_000f, 1_000_000f };
+
+        public static long   GetScoreMilestoneId(int i)   => BASE_LOCATION_ID + SCORE_MILESTONE_OFFSET + i;
+        public static string GetScoreMilestoneName(int i) => $"Score - {FormatScore(SCORE_MILESTONES[i])}";
+
+        private static string FormatScore(float score)
+        {
+            if (score >= 1_000_000f) return $"{(int)(score / 1_000_000f)}M";
+            if (score >= 1_000f)     return $"{(int)(score / 1_000f)}k";
+            return $"{(int)score}";
+        }
+
         // ── Item IDs ────────────────────────────────────────────────────────────
-        // Progression / useful items
-        public const long ITEM_SCORE_BONUS_SMALL       = BASE_ITEM_ID + 0;   // +500 score
-        public const long ITEM_SCORE_BONUS_MEDIUM      = BASE_ITEM_ID + 1;   // +2000 score
-        public const long ITEM_SCORE_BONUS_LARGE       = BASE_ITEM_ID + 2;   // +5000 score
-        public const long ITEM_RETRACT_SPEED_UP        = BASE_ITEM_ID + 3;   // +5 retract speed
-        public const long ITEM_RETRACT_BONUS_UP        = BASE_ITEM_ID + 4;   // +5 retract bonus
-        public const long ITEM_DECAY_RATE_DOWN         = BASE_ITEM_ID + 5;   // -2 bar shrink (constant)
-        public const long ITEM_DECAY_FACTOR_DOWN       = BASE_ITEM_ID + 6;   // bar shrink % reduced
-        public const long ITEM_IMPACT_PENALTY_DOWN     = BASE_ITEM_ID + 7;   // -5% impact penalty
-        public const long ITEM_BAR_THRESHOLD_DOWN      = BASE_ITEM_ID + 8;   // -500 music threshold (easier)
-        public const long ITEM_EXTRA_LEVEL             = BASE_ITEM_ID + 9;   // counts toward level goal
-        public const long ITEM_WATER_ACCESS           = BASE_ITEM_ID + 10;  // unlocks going below the water surface
-        public const long ITEM_LEVEL_SKIP             = BASE_ITEM_ID + 11;  // skips the current level (like pressing Enter)
-        public const long ITEM_GRAPPLE_PAYOUT_UP      = BASE_ITEM_ID + 12;  // +2 grapple payout speed (starts at 4, cap 14)
-        public const long ITEM_GRAPPLE_UNLOCK          = BASE_ITEM_ID + 13;  // unlocks the grapple entirely (hard block without it)
+        public const long ITEM_SCORE_BONUS_SMALL       = BASE_ITEM_ID + 0;
+        public const long ITEM_SCORE_BONUS_MEDIUM      = BASE_ITEM_ID + 1;
+        public const long ITEM_SCORE_BONUS_LARGE       = BASE_ITEM_ID + 2;
+        public const long ITEM_RETRACT_SPEED_UP        = BASE_ITEM_ID + 3;
+        public const long ITEM_RETRACT_BONUS_UP        = BASE_ITEM_ID + 4;
+        public const long ITEM_DECAY_RATE_DOWN         = BASE_ITEM_ID + 5;
+        public const long ITEM_DECAY_FACTOR_DOWN       = BASE_ITEM_ID + 6;
+        public const long ITEM_IMPACT_PENALTY_DOWN     = BASE_ITEM_ID + 7;
+        public const long ITEM_BAR_THRESHOLD_DOWN      = BASE_ITEM_ID + 8;
+        public const long ITEM_WATER_ACCESS            = BASE_ITEM_ID + 10;
+        public const long ITEM_LEVEL_SKIP              = BASE_ITEM_ID + 11;
+        public const long ITEM_GRAPPLE_PAYOUT_UP       = BASE_ITEM_ID + 12;
+        public const long ITEM_GRAPPLE_UNLOCK          = BASE_ITEM_ID + 13;
+        public const long ITEM_TRAP_GRAVITY_SPIKE      = BASE_ITEM_ID + 20;
+        public const long ITEM_TRAP_DECAY_SPIKE        = BASE_ITEM_ID + 21;
+        public const long ITEM_TRAP_DISCONNECT_GRAPPLE = BASE_ITEM_ID + 22;
 
-        // Traps
-        public const long ITEM_TRAP_GRAVITY_SPIKE      = BASE_ITEM_ID + 20;  // briefly double gravity
-        public const long ITEM_TRAP_DECAY_SPIKE        = BASE_ITEM_ID + 21;  // +10 decay rate for 10s
-        public const long ITEM_TRAP_DISCONNECT_GRAPPLE = BASE_ITEM_ID + 22;  // force-release grapple
-
-        // ── Item names (must match apworld) ─────────────────────────────────────
         public static string GetItemName(long itemId)
         {
             switch (itemId)
@@ -91,10 +116,9 @@ namespace FloatingPointArchipelago
                 case ITEM_DECAY_FACTOR_DOWN:       return "Bar Decay Factor Down";
                 case ITEM_IMPACT_PENALTY_DOWN:     return "Impact Penalty Down";
                 case ITEM_BAR_THRESHOLD_DOWN:      return "Bar Threshold Down";
-                case ITEM_EXTRA_LEVEL:             return "Extra Level";
-                case ITEM_WATER_ACCESS:           return "Water Access";
-                case ITEM_LEVEL_SKIP:             return "Level Skip";
-                case ITEM_GRAPPLE_PAYOUT_UP:      return "Grapple Payout Speed Up";
+                case ITEM_WATER_ACCESS:            return "Water Access";
+                case ITEM_LEVEL_SKIP:              return "Level Skip (Trap)";
+                case ITEM_GRAPPLE_PAYOUT_UP:       return "Grapple Payout Speed Up";
                 case ITEM_GRAPPLE_UNLOCK:          return "Grapple Unlock";
                 case ITEM_TRAP_GRAVITY_SPIKE:      return "Gravity Spike (Trap)";
                 case ITEM_TRAP_DECAY_SPIKE:        return "Decay Spike (Trap)";

@@ -6,17 +6,17 @@ namespace FloatingPointArchipelago
     /// <summary>
     /// In-game connection UI and HUD overlay for Archipelago.
     /// Rendered with Unity's legacy OnGUI (same as the base game).
+    ///
+    /// F1 toggles the connection panel.
+    /// The panel only shows connection status + a Connect/Disconnect button.
+    /// All auth details (host/slot/password) are owned by APProxy — not shown here.
     /// </summary>
     public class ConnectionUI : MonoBehaviour
     {
         public static ConnectionUI Instance { get; private set; }
 
-        // Connection form state
+        // Panel visibility
         private bool _showConnectionPanel = false;
-        private string _host = "archipelago.gg";
-        private string _port = "38281";
-        private string _slotName = "";
-        private string _password = "";
 
         // HUD messages
         private class HUDMessage
@@ -30,8 +30,8 @@ namespace FloatingPointArchipelago
         private const int MAX_TICKER_LINES = 6;
         private readonly Queue<string> _ticker = new Queue<string>();
 
-        // GUI state
-        private bool _connected => ArchipelagoClient.Instance != null && ArchipelagoClient.Instance.IsConnected;
+        // GUI state helpers
+        private bool _connected  => ArchipelagoClient.Instance != null && ArchipelagoClient.Instance.IsConnected;
         private bool _connecting => ArchipelagoClient.Instance != null && ArchipelagoClient.Instance.IsConnecting;
 
         private void Awake()
@@ -45,24 +45,13 @@ namespace FloatingPointArchipelago
         {
             if (ArchipelagoClient.Instance != null)
             {
-                ArchipelagoClient.Instance.OnMessageReceived += msg =>
-                {
-                    lock (_ticker)
-                    {
-                        _ticker.Enqueue(msg);
-                        while (_ticker.Count > MAX_TICKER_LINES) _ticker.Dequeue();
-                    }
-                };
-                ArchipelagoClient.Instance.OnConnected += () =>
-                    ShowMessage("Connected to Archipelago!", 5f);
-                ArchipelagoClient.Instance.OnDisconnected += () =>
-                    ShowMessage("Disconnected from Archipelago.", 5f);
+                ArchipelagoClient.Instance.OnConnected    += () => ShowMessage("Connected to Archipelago!", 5f);
+                ArchipelagoClient.Instance.OnDisconnected += () => ShowMessage("Disconnected from Archipelago.", 5f);
             }
         }
 
         private void Update()
         {
-            // F1 toggles the connection panel
             if (Input.GetKeyDown(KeyCode.F1))
                 _showConnectionPanel = !_showConnectionPanel;
         }
@@ -74,49 +63,80 @@ namespace FloatingPointArchipelago
 
         private void OnGUI()
         {
-            // ── Connection panel ─────────────────────────────────────────────
+            // ── Progress HUD (top-left) ─────────────────────────────────────────
+            DrawProgressHUD();
+
+            // ── Connection panel (center, F1) ───────────────────────────────────
             if (_showConnectionPanel)
                 DrawConnectionPanel();
 
-            // ── Status indicator (top-right corner) ──────────────────────────
+            // ── Status indicator (top-right) ────────────────────────────────────
             DrawStatusIndicator();
 
-            // ── HUD messages (center-top) ────────────────────────────────────
+            // ── HUD messages (center-top) ────────────────────────────────────────
             DrawHUDMessages();
 
-            // ── AP message ticker (bottom-right) ────────────────────────────
+            // ── AP message ticker (bottom-right) ─────────────────────────────────
             DrawTicker();
         }
 
+        // ── Progress HUD ─────────────────────────────────────────────────────────
+
+        private void DrawProgressHUD()
+        {
+            var client = ArchipelagoClient.Instance;
+            if (client == null || !client.IsConnected) return;
+
+            var lm = LocationManager.Instance;
+            if (lm == null) return;
+
+            int goalType = client.GoalType;
+            float x = 6f, y = 6f, w = 220f, lh = 18f;
+            GUI.color = new Color(1f, 1f, 1f, 0.85f);
+
+            if (goalType == GoalType.LevelsCompleted)
+            {
+                GUI.Label(new Rect(x, y, w, lh),
+                    $"Level {lm.CompletedLevels} / {client.LevelsRequired}");
+                y += lh;
+                GUI.Label(new Rect(x, y, w, lh),
+                    $"Bars {lm.TotalBarsCollected}");
+            }
+            else if (goalType == GoalType.BarsCollected)
+            {
+                GUI.Label(new Rect(x, y, w, lh),
+                    $"Bars {lm.TotalBarsCollected} / {client.BarsRequired}");
+                y += lh;
+                GUI.Label(new Rect(x, y, w, lh),
+                    $"Levels {lm.CompletedLevels}");
+            }
+            else if (goalType == GoalType.AllLocations)
+            {
+                GUI.Label(new Rect(x, y, w, lh),
+                    $"Locations {lm.CheckedLocationsCount} / {lm.TotalLocations}");
+            }
+
+            GUI.color = Color.white;
+        }
+
+        // ── Connection panel ──────────────────────────────────────────────────────
+
         private void DrawConnectionPanel()
         {
-            float pw = 340f, ph = 230f;
-            float px = (Screen.width - pw) / 2f;
+            float pw = 280f, ph = 110f;
+            float px = (Screen.width  - pw) / 2f;
             float py = (Screen.height - ph) / 2f;
-            GUI.Box(new Rect(px, py, pw, ph), "Archipelago Connection");
+            GUI.Box(new Rect(px, py, pw, ph), "Archipelago");
 
-            float lx = px + 10f, rx = px + 140f, w = pw - 150f;
-            float y = py + 30f, lh = 22f, gap = 28f;
-
-            GUI.Label(new Rect(lx, y, 125f, lh), "Host:port");
-            _host = GUI.TextField(new Rect(rx, y, 140f, lh), _host);
-            GUI.Label(new Rect(rx + 145f, y, 10f, lh), ":");
-            _port = GUI.TextField(new Rect(rx + 158f, y, 45f, lh), _port);
-            y += gap;
-
-            GUI.Label(new Rect(lx, y, 125f, lh), "Slot name");
-            _slotName = GUI.TextField(new Rect(rx, y, w, lh), _slotName);
-            y += gap;
-
-            GUI.Label(new Rect(lx, y, 125f, lh), "Password");
-            _password = GUI.PasswordField(new Rect(rx, y, w, lh), _password, '*');
-            y += gap + 6f;
+            float lx = px + 10f;
+            float y  = py + 30f;
+            float lh = 22f, gap = 30f;
 
             if (_connected)
             {
                 GUI.Label(new Rect(lx, y, pw - 20f, lh), "<color=lime>Connected</color>");
                 y += gap;
-                if (GUI.Button(new Rect(lx, y, 100f, lh), "Disconnect"))
+                if (GUI.Button(new Rect(lx, y, 120f, lh), "Disconnect"))
                     ArchipelagoClient.Instance.Disconnect();
             }
             else if (_connecting)
@@ -125,14 +145,15 @@ namespace FloatingPointArchipelago
             }
             else
             {
-                if (!string.IsNullOrEmpty(ArchipelagoClient.Instance?.LastError))
-                    GUI.Label(new Rect(lx, y, pw - 20f, 40f), "<color=red>" + ArchipelagoClient.Instance.LastError + "</color>");
-                y += gap;
-                if (GUI.Button(new Rect(lx, y, 100f, lh), "Connect"))
+                string err = ArchipelagoClient.Instance?.LastError;
+                if (!string.IsNullOrEmpty(err))
                 {
-                    string host = _host + ":" + _port;
-                    ArchipelagoClient.Instance?.Connect(host, _slotName, _password);
+                    GUI.Label(new Rect(lx, y, pw - 20f, 40f),
+                        "<color=red>" + err + "</color>");
+                    y += gap;
                 }
+                if (GUI.Button(new Rect(lx, y, 120f, lh), "Connect"))
+                    ArchipelagoClient.Instance?.Connect();
             }
 
             // Close button
@@ -140,17 +161,13 @@ namespace FloatingPointArchipelago
                 _showConnectionPanel = false;
         }
 
+        // ── Status indicator ──────────────────────────────────────────────────────
+
         private void DrawStatusIndicator()
         {
             string label;
             if (_connected)
-            {
-                var itemMgr = ItemManager.Instance;
-                string skipInfo = (itemMgr != null && itemMgr.LevelSkipRequired)
-                    ? $"  skips:{itemMgr.LevelSkipsAvailable}"
-                    : "";
-                label = $"<color=lime>[AP]{skipInfo}</color>";
-            }
+                label = "<color=lime>[AP]</color>";
             else if (_connecting)
                 label = "<color=yellow>[AP connecting...]</color>";
             else
@@ -158,6 +175,8 @@ namespace FloatingPointArchipelago
 
             GUI.Label(new Rect(Screen.width - 200f, 4f, 196f, 20f), label);
         }
+
+        // ── HUD messages ──────────────────────────────────────────────────────────
 
         private void DrawHUDMessages()
         {
@@ -172,6 +191,8 @@ namespace FloatingPointArchipelago
             }
             GUI.color = Color.white;
         }
+
+        // ── Ticker ───────────────────────────────────────────────────────────────
 
         private void DrawTicker()
         {
