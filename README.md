@@ -2,7 +2,7 @@
 
 A [BepInEx 5](https://github.com/BepInEx/BepInEx) plugin and [Archipelago](https://archipelago.gg) world definition for **[Floating Point](https://store.steampowered.com/app/302380/Floating_Point/)** (Tom Francis, 2014).
 
-Swing through procedurally generated levels collecting red bars — now as part of a multiworld randomizer.
+Swing through procedurally generated levels collecting red bars, now as part of a multiworld randomizer.
 
 ---
 
@@ -11,10 +11,10 @@ Swing through procedurally generated levels collecting red bars — now as part 
 | Path | Description |
 |------|-------------|
 | `src/` | C# BepInEx plugin source (net35, Unity 4.3) |
-| `APProxy/` | .NET 8 bridge process — handles the AP WebSocket connection over named pipes |
+| `APProxy/` | .NET 8 bridge process that handles the AP WebSocket connection |
 | `PatchBepInEx/` | One-time patcher for BepInEx's TraceLogSource crash |
 | `PatchSystemDll/` | One-time patcher for Mono's broken Socket/Dns static constructors |
-| `apworld/floating_point.apworld` | Archipelago world file — drop into your AP `worlds/` folder or the client's custom worlds directory |
+| `apworld/floating_point.apworld` | Archipelago world file; drop into your AP `worlds/` folder or the client's custom worlds directory |
 
 The canonical Python world source lives in the [Archipelago fork](https://github.com/Princesseuh/Archipelago/tree/floating-point) at `worlds/floating_point/`.
 
@@ -25,8 +25,8 @@ The canonical Python world source lives in the [Archipelago fork](https://github
 - **Floating Point** on Steam
 - **BepInEx 5** win_x86 installed into the game folder
 - **Archipelago** 0.5.x client / server
-- **APProxy** — a separate bridge process that handles the AP WebSocket connection (see below)
-- **.NET 8 runtime** — required to run APProxy
+- **APProxy** a separate bridge process that handles the AP WebSocket connection (see below)
+- **.NET 8 runtime** required to run APProxy
 
 ---
 
@@ -55,7 +55,9 @@ Original DLLs are backed up automatically (you'll see `BepInEx.dll.original` in 
 
 ### PatchSystemDll — fixes Mono socket/DNS crash on startup
 
-The game's `System.dll` has broken static constructors for `Socket` and `Dns` that crash on startup under old Windows Mono. This patcher replaces them with minimal stubs (`ipv4=1, ipv6=0` for Socket; no-op for Dns).
+This mod requires `System.dll` and `System.Core.dll` to be present in `Floating Point_Data/Managed/`. These files are not included with the game and must be manually sourced from a Unity 5.0.0 install. See the [BepInEx Unity 4 troubleshooting guide](https://docs.bepinex.dev/articles/user_guide/troubleshooting.html#unity-4-and-older) for instructions.
+
+Once sourced, the `System.dll` must be patched: the game's Mono has broken static constructors for `Socket` and `Dns` that crash on startup. This patcher replaces them with minimal stubs (`ipv4=1, ipv6=0` for Socket; no-op for Dns).
 
 The game path defaults to the default Steam install location. To run:
 
