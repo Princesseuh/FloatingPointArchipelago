@@ -57,53 +57,56 @@ game: Floating Point
 name: YourName
 
 Floating Point:
-  goal_type: levels_completed   # levels_completed | score | bars_collected | all_locations
-  num_levels: 10                # 1–30
-  levels_required: 3            # [goal: levels_completed]
-  goal_score: 10000             # [goal: score]
-  bars_required: 96             # [goal: bars_collected]
-  trap_percentage: 15           # 0–50
-  level_complete_condition: all_bars  # all_bars | press_enter
+  goal_type: levels_completed   # levels_completed | bars_collected | all_locations
+  num_levels: 50                # 1–200; controls how many bar milestone and level completion checks exist
+  levels_required: 50           # [goal: levels_completed] number of level completions needed
+  bars_required: 400            # [goal: bars_collected] total bars to collect
+  trap_percentage: 22           # 0–50
   water_access: enabled         # enabled | disabled
-  level_skip: enabled           # enabled | disabled
   grapple_unlock: enabled       # enabled | disabled
+  starting_retract_speed: very_slow  # very_slow | moderate | near_default
 ```
-
-Full option documentation is in [`apworld/floating_point/docs/setup_en.md`](https://github.com/Princesseuh/Archipelago/blob/floating-point/worlds/floating_point/docs/setup_en.md).
-
----
-
-## Items
-
-| Item | Effect |
-|------|--------|
-| Retract Speed Up | +5 grapple retract speed |
-| Retract Bonus Up | +5 retract speed bonus |
-| Bar Decay Rate Down | Bars shrink more slowly (flat) |
-| Bar Decay Factor Down | Bars shrink more slowly (%) |
-| Impact Penalty Down | Less score lost on impact |
-| Bar Threshold Down | Music/lights activate sooner |
-| Score Bonus (Small/Medium/Large) | +500 / +2000 / +5000 score |
-| Extra Level | Counts as 1 completed level |
-| Water Access | Unlocks going below the water surface |
-| Level Skip | Skip the current level without completing it |
-| Grapple Payout Speed Up | +2 rope payout speed (starts 4, max 14) |
-| Grapple Unlock | Enables the grapple entirely |
-| Gravity Spike (Trap) | Sudden downward impulse |
-| Decay Spike (Trap) | +10 decay rate for 10 s |
-| Grapple Disconnect (Trap) | Force-releases the grapple |
 
 ---
 
 ## Locations
 
-Floating Point generates levels **infinitely** — there is no built-in level count. The mod tracks how many times you press Enter and maps each press to a numbered AP level. `num_levels` controls how many of those presses have checks attached; after that the game keeps going but no new checks are generated.
+Total locations = `2 * num_levels + 23` (default `num_levels: 50` → **123 locations**)
 
-With default settings (`num_levels: 10`): **331 locations**
+| Type | Count | Description |
+|------|-------|-------------|
+| Cumulative bar milestones | N | "Total Bars - 8 Collected", "Total Bars - 16 Collected", ... (every 8 bars) |
+| Level completion checks | N | "Level Complete 1", "Level Complete 2", ... |
+| Single-level best-bar milestones | 16 | "Best Single Level - 2 Bars" through "Best Single Level - 32 Bars" (every 2) |
+| Score milestones | 6 | 50k / 100k / 250k / 500k / 750k / 1M |
+| Connected | 1 | Sent immediately on connecting to the server |
 
-- 320 bar locations (32 bars × 10 levels)
-- 10 level completion locations
-- 1 "Connected to Archipelago" location (sent on connect — always sphere 0)
+Level completion checks and single-level milestones above 24 bars require **Water Access**.
+
+---
+
+## Items
+
+| Item | Count | Effect |
+|------|-------|--------|
+| Retract Speed Up | 20 | +1.0 grapple retract base speed (starts at 2, vanilla 15) |
+| Retract Bonus Up | 15 | +2.0 retract speed bonus (starts at 3, vanilla 25) |
+| Bar Decay Rate Down | 10 | −0.6 flat decay per tick (starts at 26, floor 20) |
+| Bar Decay Factor Down | 10 | +0.00025 decay factor (starts at 0.9955, cap 0.998) |
+| Impact Penalty Down | 10 | −0.6 score lost on wall impact (starts at 26, floor 20) |
+| Bar Threshold Down | 8 | −500 bar height needed for music/lights (starts at 6500, floor 2500) |
+| Grapple Payout Speed Up | 10 | +1.5 rope payout speed (starts at 1, cap 16) |
+| Water Access | 1 | Unlocks going below the water surface |
+| Grapple Unlock | 1 | Enables the grapple entirely (guaranteed sphere 1) |
+| Score Bonus (Small) | 10 | +10,000 score |
+| Score Bonus (Medium) | 5 | +40,000 score |
+| Score Bonus (Large) | 3 | +100,000 score |
+| Gravity Spike (Trap) | 5 | Sudden downward impulse |
+| Decay Spike (Trap) | 5 | +10 decay rate for 10 s |
+| Grapple Disconnect (Trap) | 5 | Force-releases the grapple |
+| Level Skip (Trap) | 4 | Immediately advances to the next level |
+
+Physics upgrades intentionally start well below vanilla values — upgrades are meant to feel earned.
 
 ---
 
